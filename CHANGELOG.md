@@ -2,7 +2,80 @@
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
-## [Unreleased](https://github.com/trailofbits/manticore/compare/0.1.5...HEAD)
+## [Unreleased](https://github.com/trailofbits/manticore/compare/0.1.8...HEAD)
+
+## 0.1.8 - 2018-03-30
+
+Thanks to our external contributors!
+
+- [khorben](https://github.com/khorben)
+- [disconnect3d](https://github.com/disconnect3d)
+- [arunjohnkuruvilla](https://github.com/arunjohnkuruvilla)
+- [mroll](https://github.com/mroll)
+
+### Added
+
+- Ethereum: `--txaccount` cli argument to control caller of transaction
+- Ethereum: Per state execution trace files in workspace
+
+### Fixed
+
+- Linux: `--data` cli argument to specify concrete stdin
+- Numerous Ethereum fixes and stability improvements
+- Fixes for native cpu emulation
+
+## 0.1.7 - 2018-02-23
+
+This release brings EVM, performance, Linux emulation, and API improvements, along with numerous bug fixes. Thanks again to our external contributors!
+
+- [jean](https://github.com/jean)
+- [disconnect3d](https://github.com/disconnect3d)
+- [arunjohnkuruvilla](https://github.com/arunjohnkuruvilla)
+- [alexanderholman](https://github.com/alexanderholman)
+- [Srinivas11789](https://github.com/Srinivas11789)
+
+### Added
+
+ - [Documentation](https://github.com/trailofbits/manticore/blob/master/docs/syminput.rst) on symbolic input
+ - "[force](http://manticore.readthedocs.io/en/latest/api.html#manticore.core.cpu.abstractcpu.Cpu.write_bytes)" keyword argument in `cpu.write_bytes/read_bytes` etc.
+ - Linux syscalls: getrandom(), openat()
+
+### Fixed
+
+- Improved ARMv7 Thumb support
+- Numerous EVM bug fixes and improvements (transaction generation, SHA3 handling, instruction tracing, int overflow detection)
+- Improved x86/64 emulation performance
+
+## 0.1.6 - 2017-12-22
+
+This release brings improved EVM support, performance improvements, and numerous bug fixes. Thanks to our external contributors!
+
+- [cole-lightfighter](https://github.com/cole-lightfighter)
+- [arunjohnkuruvilla](https://github.com/arunjohnkuruvilla)
+- [Srinivas11789](https://github.com/Srinivas11789)
+- [sidhant-gupta-004](https://github.com/sidhant-gupta-004)
+- [roachspray](https://github.com/roachspray)
+- [dbogs425](https://github.com/dbogs425)
+- [HighW4y2H3ll](https://github.com/HighW4y2H3ll)
+- [chowdaryd](https://github.com/chowdaryd)
+
+### Added
+
+- Ethereum support in the command line (Solidity files)
+- --version, --txlimit flags to command line
+- x86/64: Improved support for PCMPXSTRX instruction family
+- Ethereum EVM assembly/disassembly APIs
+
+### Changed
+
+- Workspace .txt file extension changed to .input
+- Ethereum EVM analysis APIs
+
+### Fixed
+
+- Deserializing Linux states with special files (/dev) opened
+- Redundant forking performance issue fixed
+- Various bugfixes in Decree, Linux, ARMv7 Thumb, Unicorn fallback emulation, Z3 Solver interface
 
 ## 0.1.5 - 2017-10-19
 

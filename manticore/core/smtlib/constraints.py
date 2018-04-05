@@ -1,8 +1,9 @@
 from expression import BitVecVariable, BoolVariable, ArrayVariable, Array, Bool, BitVec, BitVecConstant, BoolConstant, ArrayProxy
-from visitors import GetDeclarations, TranslatorSmtlib, ArithmeticSimplifier, PrettyPrinter, pretty_print, translate_to_smtlib, get_depth, get_variables, arithmetic_simplifier
-import logging, weakref
+from visitors import GetDeclarations, TranslatorSmtlib, ArithmeticSimplifier, PrettyPrinter, pretty_print, translate_to_smtlib, get_depth, get_variables, arithmetic_simplify
+import logging
 
 logger = logging.getLogger(__name__)
+
 
 class ConstraintSet(object):
     ''' Constraint Sets
@@ -10,15 +11,15 @@ class ConstraintSet(object):
         An object containing a set of constraints. Serves also as a factory for
         new variables.
     '''
+
     def __init__(self):
         self._constraints = list()
         self._parent = None
         self._sid = 0
         self._child = None
 
-
     def __reduce__(self):
-        return (self.__class__, ( ), {'_parent': self._parent, '_constraints': self._constraints, '_sid':self._sid} )
+        return (self.__class__, (), {'_parent': self._parent, '_constraints': self._constraints, '_sid': self._sid})
 
     def __enter__(self):
         assert self._child is None
@@ -31,7 +32,6 @@ class ConstraintSet(object):
         self._child._parent = None
         self._child = None
 
-        
     def __len__(self):
         if self._parent is not None:
             return len(self._constraints) + len(self._parent)
@@ -49,10 +49,10 @@ class ConstraintSet(object):
         if isinstance(constraint, bool):
             constraint = BoolConstant(constraint)
         assert isinstance(constraint, Bool)
-        constraint = arithmetic_simplifier(constraint)
+        constraint = arithmetic_simplify(constraint)
         if isinstance(constraint, BoolConstant) and not constraint.value:
             logger.info("Adding an imposible constant constraint")
-        # If self._child is not None this constraint set has been forked and a 
+        # If self._child is not None this constraint set has been forked and a
         # a derived constraintset may be using this. So we can't add any more
         # constraints to this one. After the child constraintSet is deleted
         # we regain the ability to add constraints.
@@ -86,7 +86,7 @@ class ConstraintSet(object):
                     related_constraints.add(constraint)
                     related_variables |= variables
                     added = True
-                    
+
         result = ''
         for var in related_variables:
             result += var.declaration + '\n'
@@ -99,24 +99,24 @@ class ConstraintSet(object):
 
         for name, exp, smtlib in translator.bindings:
             if isinstance(exp, BitVec):
-                result += '(declare-fun %s () (_ BitVec %d))'%(name, exp.size)
+                result += '(declare-fun %s () (_ BitVec %d))' % (name, exp.size)
             elif isinstance(exp, Bool):
                 result += '(declare-fun %s () Bool)' % name
             elif isinstance(exp, Array):
-                result += '(declare-fun %s () (Array (_ BitVec %d) (_ BitVec 8)))' % (name, exp.index_bits)
+                result += '(declare-fun %s () (Array (_ BitVec %d) (_ BitVec %d)))' % (name, exp.index_bits, exp.value_bits)
             else:
                 raise Exception("Type not supported %r", exp)
             result += '(assert (= %s %s))\n' % (name, smtlib)
 
-        r = translator.pop()
-        while r is not None:
-            result += '(assert %s)\n' % r
-            r = translator.pop()
+        constraint_str = translator.pop()
+        while constraint_str is not None:
+            if constraint_str != 'true':
+                result += '(assert %s)\n' % constraint_str
+            constraint_str = translator.pop()
 
         logger.debug('Reduced %d constraints!!', N - len(related_constraints))
 
         return result
-        #return str(self) #//result
 
     @property
     def declarations(self):
@@ -124,8 +124,8 @@ class ConstraintSet(object):
         for a in self.constraints:
             try:
                 declarations.visit(a)
-            except:
-                # there recursion limit exceeded problem, 
+            except BaseException:
+                # there recursion limit exceeded problem,
                 # try a slower, iterative solution
                 #logger.info('WARNING: using iterpickle to dump recursive expression')
                 #from utils import iterpickle
@@ -150,32 +150,39 @@ class ConstraintSet(object):
         for expression in self.constraints:
             translator.visit(expression)
 
+        # band aid hack around the fact that we are double declaring stuff :( :(
+        tmp = set()
         for d in self.declarations:
-            result += d.declaration + '\n'
+            tmp.add(d.declaration)
+        for d in tmp:
+            result += d + '\n'
 
         for name, exp, smtlib in translator.bindings:
             if isinstance(exp, BitVec):
-                result += '(declare-fun %s () (_ BitVec %d))'%(name, exp.size)
+                result += '(declare-fun %s () (_ BitVec %d))' % (name, exp.size)
             elif isinstance(exp, Bool):
                 result += '(declare-fun %s () Bool)' % name
             elif isinstance(exp, Array):
-                result += '(declare-fun %s () (Array (_ BitVec %d) (_ BitVec 8)))' % (name, exp.index_bits)
+                result += '(declare-fun %s () (Array (_ BitVec %d) (_ BitVec %d)))' % (name, exp.index_bits, exp.value_bits)
             else:
                 raise Exception("Type not supported %r", exp)
             result += '(assert (= %s %s))\n' % (name, smtlib)
 
-        r = translator.pop()
-        while r is not None:
-            result += '(assert %s)\n' % r
-            r = translator.pop()
+        constraint_str = translator.pop()
+        while constraint_str is not None:
+            if constraint_str != 'true':
+                result += '(assert %s)\n' % constraint_str
+            constraint_str = translator.pop()
 
         return result
 
         buf = ''
         for d in self.declarations:
             buf += d.declaration + '\n'
-        for a in self.constraints:
-            buf += '(assert %s)\n' % translate_to_smtlib(a, use_bindings=True)
+        for constraint in self.constraints:
+            constraint_str = translate_to_smtlib(constraint, use_bindings=True)
+            if constraint_str != 'true':
+                buf += '(assert %s)\n' % constraint_str
         return buf
 
     def _get_new_name(self, name='VAR'):
@@ -202,16 +209,14 @@ class ConstraintSet(object):
         name = self._get_new_name(name)
         return BitVecVariable(size, name, taint=taint)
 
-    def new_array(self, index_bits=32, name='A', index_max=None, taint=frozenset()):
-        ''' Declares a free symbolic array of 8 bits long bitvectors in the constraint store.
-            :param index_bit_size: size in bits for the array indexes one of [32, 64]
+    def new_array(self, index_bits=32, name='A', index_max=None, value_bits=8, taint=frozenset()):
+        ''' Declares a free symbolic array of value_bits long bitvectors in the constraint store.
+            :param index_bits: size in bits for the array indexes one of [32, 64]
+            :param value_bits: size in bits for the array values
             :param name: try to assign name to internal variable representation,
                          if not uniq a numeric nonce will be appended
             :param index_max: upper limit for indexes on ths array (#FIXME)
-            :return: a fresh BitVecVariable
+            :return: a fresh ArrayProxy
         '''
-        assert index_bits in (8, 16, 32, 64, 128, 256)
         name = self._get_new_name(name)
-        return ArrayProxy(ArrayVariable(index_bits, index_max, name, taint=taint))
-
-
+        return ArrayProxy(ArrayVariable(index_bits, index_max, value_bits, name, taint=taint))

@@ -31,6 +31,23 @@ class IntegrationTest(unittest.TestCase):
 
         return set(vitems)
 
+    def _simple_cli_run(self, filename, contract=None):
+        """
+        Simply run the Manticore command line with `filename`
+        :param filename: Name of file inside the `tests/binaries` directory
+        :return:
+        """
+        dirname = os.path.dirname(__file__)
+        filename = '{}/binaries/{}'.format(dirname, filename)
+        command = ['python', '-m', 'manticore']
+
+        if contract:
+            command.append('--contract')
+            command.append(contract)
+        command.append(filename)
+
+        subprocess.check_call(command, stdout=subprocess.PIPE)
+
     def _runWithTimeout(self, procargs, logfile, timeout=1200):
 
         with open(os.path.join(os.pardir, logfile), "w") as output:
@@ -51,7 +68,6 @@ class IntegrationTest(unittest.TestCase):
         filename = os.path.abspath(os.path.join(dirname, 'binaries/arguments_linux_amd64'))
         self.assertTrue(filename.startswith(os.getcwd()))
         filename = filename[len(os.getcwd())+1:]
-        data = file(filename,'rb').read()
         workspace = '%s/workspace'%self.test_dir
         t = time.time()
         with open(os.path.join(os.pardir, '%s/output.log'%self.test_dir), "w") as output:
@@ -88,7 +104,6 @@ class IntegrationTest(unittest.TestCase):
         filename = os.path.abspath(os.path.join(dirname, 'binaries/arguments_linux_amd64'))
         self.assertTrue(filename.startswith(os.getcwd()))
         filename = filename[len(os.getcwd())+1:]
-        data = file(filename,'rb').read()
         workspace = '%s/workspace'%self.test_dir
         assertions = '%s/assertions.txt'%self.test_dir
         file(assertions,'w').write('0x0000000000401003 ZF == 1')
@@ -108,8 +123,6 @@ class IntegrationTest(unittest.TestCase):
         filename = os.path.abspath(os.path.join(dirname, 'binaries/cadet_decree_x86'))
         self.assertTrue(filename.startswith(os.getcwd()))
         filename = filename[len(os.getcwd())+1:]
-        SE = os.path.join(dirname, '../main.py')
-        data = file(filename,'rb').read()
         workspace = '%s/workspace'%self.test_dir
         self._runWithTimeout(['python', '-m', 'manticore',
                     '--workspace', workspace,
@@ -121,6 +134,43 @@ class IntegrationTest(unittest.TestCase):
         actual = self._loadVisitedSet(os.path.join(dirname, '%s/visited.txt'%workspace))
         self.assertTrue(len(actual) > 100 )
 
+    def test_eth_regressions(self):
+        issues = [
+            {'number': 676, 'contract': None},
+            {'number': 678, 'contract': None},
+            {'number': 701, 'contract': None},
+            {'number': 714, 'contract': None},
+            {'number': 735, 'contract': None},
+            {'number': 760, 'contract': None},
+            {'number': 780, 'contract': None},
+            {'number': 795, 'contract': None},
+            {'number': 799, 'contract': 'C'},
+            {'number': 807, 'contract': 'C'},
+        ]
+
+        for issue in issues:
+            self._simple_cli_run('{}.sol'.format(issue['number']),
+                                 contract=issue['contract'])
+
+    def test_eth_705(self):
+        # This test needs to run inside tests/binaries because the contract imports a file
+        # that is in the tests/binaries dir
+        dirname = os.path.dirname(__file__)
+        old_cwd = os.getcwd()
+        os.chdir('{}/binaries'.format(dirname))
+        self._simple_cli_run('705.sol')
+        os.chdir(old_cwd)
+
+    def test_basic_arm(self):
+        dirname = os.path.dirname(__file__)
+        filename = os.path.abspath(os.path.join(dirname, 'binaries/basic_linux_armv7'))
+        workspace = '%s/workspace' % self.test_dir
+        output = subprocess.check_output(['python', '-m', 'manticore', '--workspace', workspace, filename])
+
+        with open(os.path.join(workspace, "test_00000000.stdout")) as f:
+            self.assertIn("Message", f.read())
+        with open(os.path.join(workspace, "test_00000001.stdout")) as f:
+            self.assertIn("Message", f.read())
 
 if __name__ == '__main__':
     unittest.main()

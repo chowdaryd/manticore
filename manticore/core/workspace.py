@@ -15,6 +15,7 @@ from multiprocessing.managers import SyncManager
 
 from .smtlib import solver
 from .smtlib.solver import SolverException
+from .state import State
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class StateSerializer(object):
     StateSerializer can serialize and deserialize :class:`~manticore.core.state.State` objects from and to
     stream-like objects.
     """
+
     def __init__(self):
         pass
 
@@ -65,17 +67,17 @@ class Store(object):
 
     @classmethod
     def fromdescriptor(cls, desc):
-	"""
-	Create a :class:`~manticore.core.workspace.Store` instance depending on the descriptor.
+        """
+        Create a :class:`~manticore.core.workspace.Store` instance depending on the descriptor.
 
-	Valid descriptors:
-	  * fs:<path>
-	  * redis:<hostname>:<port>
-	  * mem:
+        Valid descriptors:
+          * fs:<path>
+          * redis:<hostname>:<port>
+          * mem:
 
-	:param str desc: Store descriptor
-	:return: Store instance
-	"""
+        :param str desc: Store descriptor
+        :return: Store instance
+        """
         type_, uri = ('fs', None) if desc is None else desc.split(':', 1)
         for subclass in cls.__subclasses__():
             if subclass.store_type == type_:
@@ -253,7 +255,7 @@ class MemoryStore(Store):
     """
     store_type = 'mem'
 
-    #TODO(yan): Once we get a global config store, check it to make sure
+    # TODO(yan): Once we get a global config store, check it to make sure
     # we're executing in a single-worker or test environment.
 
     def __init__(self, uri=None):
@@ -271,6 +273,7 @@ class MemoryStore(Store):
 
     def ls(self, glob_str):
         return list(self._data)
+
 
 class RedisStore(Store):
     """
@@ -320,6 +323,7 @@ class RedisStore(Store):
 # This is copied from Executor to not create a dependency on the naming of the lock field
 def sync(f):
     """ Synchronization decorator. """
+
     def new_function(self, *args, **kw):
         self._lock.acquire()
         try:
@@ -389,9 +393,18 @@ class Workspace(object):
         :return: New state id
         :rtype: int
         """
+        assert isinstance(state, State)
         id_ = self._get_id()
         self._store.save_state(state, '{}{:08x}{}'.format(self._prefix, id_, self._suffix))
         return id_
+
+    def rm_state(self, state_id):
+        """
+        Remove a state from storage identified by `state_id`.
+
+        :param state_id: The state reference of what to load
+        """
+        return self._store.rm('{}{:08x}{}'.format(self._prefix, state_id, self._suffix))
 
 
 class ManticoreOutput(object):
@@ -402,6 +415,7 @@ class ManticoreOutput(object):
     Invoked only from :class:`manticore.Manticore` from a single parent process, so
     locking is not required.
     """
+
     def __init__(self, desc=None):
         """
         Create an object capable of producing Manticore output.
@@ -414,6 +428,23 @@ class ManticoreOutput(object):
         self._last_id = 0
         self._id_gen = manager.Value('i', self._last_id)
         self._lock = manager.Condition(manager.RLock())
+
+    def testcase(self, prefix='test'):
+        class Testcase(object):
+            def __init__(self, workspace, prefix):
+                self._num = workspace._increment_id()
+                self._prefix = prefix
+                self._ws = workspace
+
+            @property
+            def num(self):
+                return self._num
+
+            def open_stream(self, suffix=''):
+                stream_name = '{}_{:08x}.{}'.format(self._prefix, self._num, suffix)
+                return self._ws.save_stream(stream_name)
+
+        return Testcase(self, prefix)
 
     @property
     def store(self):
@@ -438,6 +469,7 @@ class ManticoreOutput(object):
     def _increment_id(self):
         self._last_id = self._id_gen.value
         self._id_gen.value += 1
+        return self._last_id
 
     def _named_key(self, suffix):
         return '{}_{:08x}.{}'.format(self._named_key_prefix, self._last_id, suffix)
@@ -517,8 +549,8 @@ class ManticoreOutput(object):
         with self._named_stream('trace') as f:
             if 'trace' not in state.context:
                 return
-            for pc in state.context['trace']:
-                f.write('0x{:08x}\n'.format(pc))
+            for entry in state.context['trace']:
+                f.write('0x{:x}\n'.format(entry))
 
     def save_constraints(self, state):
         # XXX(yan): We want to conditionally enable this check
@@ -528,7 +560,7 @@ class ManticoreOutput(object):
             f.write(str(state.constraints))
 
     def save_input_symbols(self, state):
-        with self._named_stream('txt') as f:
+        with self._named_stream('input') as f:
             for symbol in state.input_symbols:
                 buf = solver.get_value(state.constraints, symbol)
                 f.write('%s: %s\n' % (symbol.name, repr(buf)))
