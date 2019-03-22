@@ -13,16 +13,14 @@ Bugs
 
 '''
 
-import sys
-import Queue
+import queue
 import struct
 import itertools
 
-from manticore import Manticore
+from manticore.native import Manticore
 from manticore.core.plugin import ExtendedTracer, Follower, Plugin
 from manticore.core.smtlib.constraints import ConstraintSet
-from manticore.core.smtlib import Z3Solver, solver
-from manticore.core.smtlib.visitors  import pretty_print as pp
+from manticore.core.smtlib import solver
 
 import copy
 from manticore.core.smtlib.expression import *
@@ -32,28 +30,27 @@ VERBOSITY = 0
 
 def _partition(pred, iterable):
     t1, t2 = itertools.tee(iterable)
-    return (list(itertools.ifilterfalse(pred, t1)), filter(pred, t2))
+    return (list(itertools.filterfalse(pred, t1)), list(filter(pred, t2)))
 
 def log(s):
-    print '[+]', s
+    print('[+]', s)
 
 class TraceReceiver(Plugin):
     def __init__(self, tracer):
         self._trace = None
         self._tracer = tracer
-        super(self.__class__, self).__init__()
+        super().__init__()
 
     @property
     def trace(self):
         return self._trace
 
-    def will_generate_testcase_callback(self, state, test_id, msg):
-        self._trace = state.context[self._tracer.context_key]
+    def will_generate_testcase_callback(self, state, testcase, msg):
+        self._trace = state.context.get(self._tracer.context_key, [])
 
         instructions, writes = _partition(lambda x: x['type'] == 'regs', self._trace)
         total = len(self._trace)
-        log('Recorded concrete trace: {}/{} instructions, {}/{} writes'.format(
-            len(instructions), total, len(writes), total))
+        log(f'Recorded concrete trace: {len(instructions)}/{total} instructions, {len(writes)}/{total} writes')
 
 def flip(constraint):
     '''
@@ -63,7 +60,7 @@ def flip(constraint):
         ->
     (Equal (BitVecITE Cond IfC ElseC) ElseC)
     '''
-    equal = copy.deepcopy(constraint)
+    equal = copy.copy(constraint)
 
     assert len(equal.operands) == 2
     # assume they are the equal -> ite form that we produce on standard branches
@@ -73,7 +70,7 @@ def flip(constraint):
     cond, iifpc, eelsepc = ite.operands
     assert isinstance(iifpc, BitVecConstant) and isinstance(eelsepc, BitVecConstant)
 
-    equal.operands[1] = eelsepc if forcepc.value == iifpc.value else iifpc
+    equal._operands= (equal.operands[0], eelsepc if forcepc.value == iifpc.value else iifpc)
 
     return equal
 
@@ -132,12 +129,17 @@ def constraints_to_constraintset(constupl):
 
 def input_from_cons(constupl, datas):
     ' solve bytes in |datas| based on '
+    def make_chr(c):
+        try:
+            return chr(c)
+        except:
+            return c
     newset = constraints_to_constraintset(constupl)
 
     ret = ''
     for data in datas:
         for c in data:
-            ret += chr(solver.get_value(newset, c))
+            ret += make_chr(solver.get_value(newset, c))
     return ret
 
 # Run a concrete run with |inp| as stdin
@@ -209,7 +211,7 @@ def get_new_constrs_for_queue(oldcons, newcons):
         # candidate new constraint sets might not be sat because we blindly
         # permute the new constraints that the path uncovered and append them
         # back onto the original set. we do this without regard for how the
-        # permutation of the new constraints combines with the old constratins
+        # permutation of the new constraints combines with the old constraints
         # to affect the satisfiability of the whole
         if constraints_are_sat(candidate):
             ret.append(candidate)
@@ -218,7 +220,7 @@ def get_new_constrs_for_queue(oldcons, newcons):
 
 def inp2ints(inp):
     a, b, c = struct.unpack('<iii', inp)
-    return 'a={} b={} c={}'.format(a, b, c)
+    return f'a={a} b={b} c={c}'
 
 def ints2inp(*ints):
     return struct.pack('<'+'i'*len(ints), *ints)
@@ -238,7 +240,7 @@ def concrete_input_to_constraints(ci, prev=None):
     
     log("getting constraints from symbolic run")
     cons, datas = symbolic_run_get_cons(trc)
-    # hmmm ideally do some smart stuff so we don't have to check if the
+    # hmmm: ideally, do some smart stuff so we don't have to check if the
     # constraints are unsat. something like the compare the constraints set
     # which you used to generate the input, and the constraint set you got
     # from the symex. sounds pretty hard
@@ -246,27 +248,27 @@ def concrete_input_to_constraints(ci, prev=None):
     # but maybe a dumb way where we blindly permute the constraints
     # and just check if they're sat before queueing will work
     new_constraints = get_new_constrs_for_queue(prev, cons)
-    log('permuting constraints and adding {} constraints sets to queue'.format(len(new_constraints)))
+    log(f'permuting constraints and adding {len(new_constraints)} constraints sets to queue')
     return new_constraints, datas
 
 
 def main():
 
-    q = Queue.Queue()
+    q = queue.Queue()
 
     # todo randomly generated concrete start
     stdin = ints2inp(0, 5, 0)
 
-    log('seed input generated ({}), running initial concrete run.'.format(inp2ints(stdin)))
+    log(f'seed input generated ({inp2ints(stdin)}), running initial concrete run.')
 
     to_queue, datas = concrete_input_to_constraints(stdin)
     for each in to_queue:
         q.put(each)
 
-    # hmmm probably issues with the datas stuff here? probably need to store
-    # the datas in the q or something. what if there was a new read(2) deep in the program, changing the datas
+    # hmmm: probably issues with the datas stuff here? probably need to store
+    # the datas in the queue or something. what if there was a new read(2) deep in the program, changing the datas?
     while not q.empty():
-        log('get constraint set from queue, queue size: {}'.format(q.qsize()))
+        log(f'get constraint set from queue, queue size: {q.qsize()}')
         cons = q.get()
         inp = input_from_cons(cons, datas)
         to_queue, new_datas = concrete_input_to_constraints(inp, cons)
@@ -276,7 +278,7 @@ def main():
         for each in to_queue:
             q.put(each)
 
-    log('paths found: {}'.format(len(traces)))
+    log(f'paths found: {len(traces)}')
 
 if __name__=='__main__':
     main()

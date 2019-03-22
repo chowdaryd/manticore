@@ -25,7 +25,7 @@ class Singleton(type):
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
         return cls._instances[cls]
 
-class TraceVisualizer(object):
+class TraceVisualizer:
     __metaclass__ = Singleton
     def __init__(self, view, workspace, base=0x0, live=False):
         self.view = view
@@ -101,7 +101,7 @@ class TraceVisualizer(object):
             op = xref.function.get_lifted_il_at(xref.address).operation
         except IndexError:
             w = "ManticoreTrace: Could not lookup " + hex(xref.address)
-            w += " address for funciton " + str(xref.function)
+            w += " address for function " + str(xref.function)
             log.log_warn(w)
             return
         if not (op == enums.LowLevelILOperation.LLIL_CALL or

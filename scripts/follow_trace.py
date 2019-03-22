@@ -1,40 +1,41 @@
 #!/usr/bin/env python
 
-'''
+"""
 A simple trace following execution driver script. Only supports passing symbolic arguments via argv.
+"""
 
-'''
 
-import sys
-import time
 import argparse
 import itertools
+import sys
+import time
 
-from manticore import Manticore, issymbolic
+from manticore import issymbolic
 from manticore.core.plugin import ExtendedTracer, Plugin
+from manticore.native import Manticore
+
 
 def _partition(pred, iterable):
     t1, t2 = itertools.tee(iterable)
-    return (list(itertools.ifilterfalse(pred, t1)), filter(pred, t2))
+    return list(itertools.filterfalse(pred, t1)), list(filter(pred, t2))
 
 
 class TraceReceiver(Plugin):
     def __init__(self, tracer):
         self._trace = None
         self._tracer = tracer
-        super(self.__class__, self).__init__()
+        super().__init__()
 
     @property
     def trace(self):
         return self._trace
 
-    def will_generate_testcase_callback(self, state, test_id, msg):
+    def will_generate_testcase_callback(self, state, testcase, msg):
         self._trace = state.context[self._tracer.context_key]
 
         instructions, writes = _partition(lambda x: x['type'] == 'regs', self._trace)
         total = len(self._trace)
-        print 'Recorded concrete trace: {}/{} instructions, {}/{} writes'.format(
-            len(instructions), total, len(writes), total)
+        print(f'Recorded concrete trace: {len(instructions)}/{total} instructions, {len(writes)}/{total} writes')
 
 
 class Follower(Plugin):
@@ -44,7 +45,7 @@ class Follower(Plugin):
         self.last_instruction = None
         self.symbolic_ranges = []
         self.active = True
-        super(self.__class__, self).__init__()
+        super().__init__()
 
     def add_symbolic_range(self, pc_start, pc_end):
         self.symbolic_ranges.append((pc_start,pc_end))
@@ -82,9 +83,9 @@ class Follower(Plugin):
 def main():
     parser = argparse.ArgumentParser(description='Follow a concrete trace')
     parser.add_argument('-f', '--explore_from', help='Value of PC from which to explore symbolically', type=str)
-    parser.add_argument('-t', '--explore_to', type=str, default=sys.maxint,
+    parser.add_argument('-t', '--explore_to', type=str, default=sys.maxsize,
                         help="Value of PC until which to explore symbolically. (Probably don't want this set)")
-    parser.add_argument('--verbose', '-v', action='count', help='Increase verbosity')
+    parser.add_argument('--verbose', '-v', action='count', default=0, help='Increase verbosity')
     parser.add_argument('cmd', type=str, nargs='+',
                         help='Program and arguments. Use "--" to separate script arguments from target arguments')
     args = parser.parse_args(sys.argv[1:])
@@ -113,6 +114,7 @@ def main():
     m2.verbosity(args.verbose)
     m2.register_plugin(f)
     m2.run()
+
 
 if __name__=='__main__':
     main()

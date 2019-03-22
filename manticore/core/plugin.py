@@ -1,14 +1,15 @@
 import logging
-
-from capstone import CS_GRP_JUMP
+from contextlib import contextmanager
 
 from ..utils.helpers import issymbolic
-from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
 
-class Plugin(object):
+class Plugin:
+    def __init__(self):
+        self.manticore = None
+
     @contextmanager
     def locked_context(self, key=None, value_type=list):
         """
@@ -32,9 +33,13 @@ class Plugin(object):
             self.manticore.context[plugin_context_name] = {}
         return self.manticore.context[plugin_context_name]
 
-    def __init__(self):
-        self.manticore = None
-        self.last_reg_state = {}
+    def on_register(self):
+        ''' Called by parent manticore on registration '''
+        pass
+
+    def on_unregister(self):
+        ''' Called be parent manticore on un-registration '''
+        pass
 
 
 def _dict_diff(d1, d2):
@@ -56,11 +61,8 @@ def _dict_diff(d1, d2):
 
 
 class Tracer(Plugin):
-    def will_start_run_callback(self, state):
-        state.context['trace'] = []
-
     def did_execute_instruction_callback(self, state, pc, target_pc, instruction):
-        state.context['trace'].append(pc)
+        state.context.setdefault('trace', []).append(pc)
 
 
 class ExtendedTracer(Plugin):
@@ -68,13 +70,10 @@ class ExtendedTracer(Plugin):
         '''
         Record a detailed execution trace
         '''
-        super(ExtendedTracer, self).__init__()
+        super().__init__()
         self.last_dict = {}
         self.current_pc = None
         self.context_key = 'e_trace'
-
-    def will_start_run_callback(self, state):
-        state.context[self.context_key] = []
 
     def register_state_to_dict(self, cpu):
         d = {}
@@ -93,25 +92,25 @@ class ExtendedTracer(Plugin):
             'values': _dict_diff(self.last_dict, reg_state)
         }
         self.last_dict = reg_state
-        state.context[self.context_key].append(entry)
+        state.context.setdefault(self.context_key, []).append(entry)
 
     def will_read_memory_callback(self, state, where, size):
         if self.current_pc == where:
             return
 
-        #print 'will_read_memory %x %r, current_pc %x'%(where, size, self.current_pc)
+        # print(f'will_read_memory {where:x} {size!r}, current_pc {self.current_pc:x}')
 
     def did_read_memory_callback(self, state, where, value, size):
         if self.current_pc == where:
             return
 
-        #print 'did_read_memory %x %r %r, current_pc %x'%(where, value, size, self.current_pc)
+        # print(f'did_read_memory {where:x} {value!r} {size!r}, current_pc {self.current_pc:x}')
 
     def will_write_memory_callback(self, state, where, value, size):
         if self.current_pc == where:
             return
 
-        #print 'will_write_memory %x %r %r, current_pc %x'%(where, value, size, self.current_pc)
+        # print(f'will_write_memory {where:x} {value!r} {size!r}, current_pc {self.current_pc:x}')
 
     def did_write_memory_callback(self, state, where, value, size):
         if self.current_pc == where:
@@ -124,7 +123,7 @@ class ExtendedTracer(Plugin):
             'value': value,
             'size': size
         }
-        state.context[self.context_key].append(entry)
+        state.context.setdefault(self.context_key, []).append(entry)
 
 
 class Follower(Plugin):
@@ -134,7 +133,7 @@ class Follower(Plugin):
         self.last_instruction = None
         self.symbolic_ranges = []
         self.active = True
-        super(self.__class__, self).__init__()
+        super().__init__()
 
     def add_symbolic_range(self, pc_start, pc_end):
         self.symbolic_ranges.append((pc_start, pc_end))
@@ -170,12 +169,9 @@ class Follower(Plugin):
 
 
 class RecordSymbolicBranches(Plugin):
-    def will_start_run_callback(self, state):
-        state.context['branches'] = {}
-
     def did_execute_instruction_callback(self, state, last_pc, target_pc, instruction):
         if state.context.get('forking_pc', False):
-            branches = state.context['branches']
+            branches = state.context.setdefault('branches', {})
             branch = (last_pc, target_pc)
             if branch in branches:
                 branches[branch] += 1
@@ -212,7 +208,7 @@ class InstructionCounter(Plugin):
 
 class Visited(Plugin):
     def __init__(self, coverage_file='visited.txt'):
-        super(Visited, self).__init__()
+        super().__init__()
         self.coverage_file = coverage_file
 
     def will_terminate_state_callback(self, state, state_id, ex):
@@ -240,66 +236,36 @@ class Visited(Plugin):
         # Fixme this is duplicated?
         if self.coverage_file is not None:
             with self.manticore._output.save_stream(self.coverage_file) as f:
-                fmt = "0x{:016x}\n"
                 for m in executor_visited:
-                    f.write(fmt.format(m))
+                    f.write(f"0x{m:016x}\n")
         logger.info('Coverage: %d different instructions executed', len(executor_visited))
 
 
-class ConcreteTraceFollower(Plugin):
-    def __init__(self, source=None):
-        '''
-        :param iterable source: Iterator producing instruction pointers to be followed
-        '''
-        super(ConcreteTraceFollower, self).__init__()
-        self.source = source
-
-    def will_start_run_callback(self, state):
-        self.saved_flags = None
-
-    def will_execute_instruction_callback(self, state, pc, instruction):
-        if not instruction.group(CS_GRP_JUMP):
-            self.saved_flags = None
-            return
-
-        # Likely unconditional
-        if not instruction.regs_read:
-            self.saved_flags = None
-            return
-
-        self.saved_flags = state.cpu.RFLAGS
-        state.cpu.RFLAGS = state.new_symbolic_value(state.cpu.address_bit_size)
-
-    def did_execute_instruction_callback(self, state, pc, target_pc, instruction):
-        # Should direct execution via trace
-        if self.saved_flags:
-            state.cpu.RFLAGS = self.saved_flags
-
 # TODO document all callbacks
-
-
 class ExamplePlugin(Plugin):
+    def will_open_transaction_callback(self, state, tx):
+        logger.info('will open a transaction %r %r', state, tx)
+
+    def will_close_transaction_callback(self, state, tx):
+        logger.info('will close a transaction %r %r', state, tx)
+
     def will_decode_instruction_callback(self, state, pc):
-        logger.info('will_decode_instruction', state, pc)
+        logger.info('will_decode_instruction %r %r', state, pc)
 
     def will_execute_instruction_callback(self, state, pc, instruction):
-        logger.info('will_execute_instruction', state, pc, instruction)
+        logger.info('will_execute_instruction %r %r %r', state, pc, instruction)
 
     def did_execute_instruction_callback(self, state, pc, target_pc, instruction):
-        logger.info('did_execute_instruction', state, pc, target_pc, instruction)
+        logger.info('did_execute_instruction %r %r %r %r', state, pc, target_pc, instruction)
 
     def will_start_run_callback(self, state):
-        ''' Called once at the begining of the run.
+        ''' Called once at the beginning of the run.
             state is the initial root state
         '''
         logger.info('will_start_run')
 
     def did_finish_run_callback(self):
         logger.info('did_finish_run')
-
-    def did_enqueue_state_callback(self, state_id, state):
-        ''' state was just got enqueued in the executor procesing list'''
-        logger.info('did_enqueue_state %r %r', state_id, state)
 
     def will_fork_state_callback(self, parent_state, expression, solutions, policy):
         logger.info('will_fork_state %r %r %r %r', parent_state, expression, solutions, policy)
@@ -316,8 +282,8 @@ class ExamplePlugin(Plugin):
     def will_terminate_state_callback(self, state, state_id, exception):
         logger.info('will_terminate_state %r %r %r', state, state_id, exception)
 
-    def will_generate_testcase_callback(self, state, testcase_id, message):
-        logger.info('will_generate_testcase %r %r %r', state, testcase_id, message)
+    def will_generate_testcase_callback(self, state, testcase, message):
+        logger.info('will_generate_testcase %r %r %r', state, testcase, message)
 
     def will_read_memory_callback(self, state, where, size):
         logger.info('will_read_memory %r %r %r', state, where, size)

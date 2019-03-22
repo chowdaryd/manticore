@@ -3,7 +3,7 @@ checks:
   argument-count:
     enabled: true
     config:
-      threshold: 7
+      threshold: 12
   complex-logic:
     enabled: true
     config:
@@ -11,23 +11,23 @@ checks:
   file-lines:
     enabled: true
     config:
-      threshold: 1000
+      threshold: 9000
   method-complexity:
     enabled: true
     config:
-      threshold: 25
+      threshold: 40
   method-count:
     enabled: true
     config:
-      threshold: 30
+      threshold: 35
   method-lines:
     enabled: true
     config:
-      threshold: 50
+      threshold: 53
   nested-control-flow:
     enabled: true
     config:
-      threshold: 5
+      threshold: 10
   return-statements:
     enabled: true
     config:
@@ -35,7 +35,7 @@ checks:
   similar-code:
     enabled: true
     config:
-      threshold: 100
+      threshold: 210
   identical-code:
     enabled: true
     config:
@@ -46,6 +46,8 @@ plugins:
     checks:
       E712:
         enabled: false
+      E701:
+        enabled: false
   sonar-python:
     enabled: false
     config:
@@ -53,7 +55,7 @@ plugins:
   radon:
     enabled: false
     config:
-      python_version: 2
+      python_version: 3
       threshold: "D"
 exclude_patterns:
   - "docs/"
@@ -62,4 +64,5 @@ exclude_patterns:
   - "tests/"
   - "mcore_*/"
   - ".tox/"
+  - "manticore/ethereum/parsetab.py"
 
